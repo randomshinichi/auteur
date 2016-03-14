@@ -1,22 +1,22 @@
 #include <SPI.h>
 #include "waveforms.h"
-#define averager_size 10000
+#define averager_size 20000
 
 String inputstring = "";
 boolean stringcomplete = false;
 String args[10];
 unsigned long starttime, elapsedtime;
-double averager[averager_size]; // the averaging array
+int averager[averager_size]; // the averaging array
 unsigned int averager_i; // keeps track of where we are in the averager array
 unsigned int averager_counter; // counts how many times the averager has been added to
-double averager_sum; // constantly updated sum of averaging array
+double averager_sum; // variable that will hold the sum of averaging array
 int minADC = 688; // these are reasonable defaults, will be changed with calibration
 int maxADC = 3424;
+int rangeADC = (maxADC - minADC) / 2;
 double minDACvolt = 0.5518798828;
 double maxDACvolt = 2.7585937500;
 boolean lockamp_debug = false;
 boolean averager_debug = false;
-boolean results_display = false;
 
 void setup() {
   analogWriteResolution(12);
@@ -24,7 +24,7 @@ void setup() {
   pinMode(A0, INPUT);
   while (!SerialUSB);
   SerialUSB.begin(115200);
-  SerialUSB.println("Available commands: lockamp(frequency,repeat) analogread analogwrite(0-4095) calibrate status debug(lockamp_debug, averager_debug, results_display)");
+  SerialUSB.println("Available commands: lockamp(repeat,frequency[frequency, frequency]) analogread analogwrite(0-4095) calibrate status debug(lockamp_debug, averager_debug)");
   SerialUSB.print("auteur is listening: ");
   inputstring.reserve(200); // Shell accepts up to 200 characters, 10 arguments
 }
@@ -46,18 +46,31 @@ void shell() {
   String *inputstring_processed;
   inputstring_processed = splitcmd(inputstring, ' ');
   if (inputstring_processed[0] == "lockamp") {
-    int param1, param2;
+    int param1, param2, param3, param4;
     param1 = string2int(inputstring_processed[1]);
     param2 = string2int(inputstring_processed[2]);
-    lockinamplifier(param1, param2);
-    SerialUSB.print("averager_counter (ignore result below if this is <10,000): "); SerialUSB.println(averager_counter);
-    double averager_result = 2 * averager_sum / averager_size;
-    SerialUSB.print("averager_result: "); SerialUSB.println(averager_result, 10);
+    param3 = string2int(inputstring_processed[3]);
+    param4 = string2int(inputstring_processed[4]);
+    if (param2) {
+      SerialUSB.print(param2);SerialUSB.println("Hz");
+      lockinamplifier(param1, param2);
+    }
+    else
+    {
+      SerialUSB.println("You didn't specify the frequency");
+    }
+    if (param3) {
+      SerialUSB.print(param3);SerialUSB.println("Hz");
+      lockinamplifier(param1, param3);
+    }
+    if (param4) {
+      SerialUSB.print(param4);SerialUSB.println("Hz");
+      lockinamplifier(param1, param4);
+    }
   }
   if (inputstring_processed[0] == "debug") {
     int param1 = string2int(inputstring_processed[1]);
     int param2 = string2int(inputstring_processed[2]);
-    int param3 = string2int(inputstring_processed[3]);
     if (param1)
       lockamp_debug = true;
     else
@@ -66,10 +79,6 @@ void shell() {
       averager_debug = true;
     else
       averager_debug = false;
-    if (param3)
-      results_display = true;
-    else
-      results_display = false;
   }
   if (inputstring_processed[0] == "analogread") {
     int input = analogRead(ADC0);
@@ -86,17 +95,14 @@ void shell() {
   }
   if (inputstring_processed[0] == "status") {
     SerialUSB.print("minADC: "); SerialUSB.print(minADC); SerialUSB.print(" maxADC: "); SerialUSB.println(maxADC);
-
-    starttime = micros();
     SerialUSB.print("minDACvolt: "); SerialUSB.print(minDACvolt, 10); SerialUSB.print(" maxDACvolt: "); SerialUSB.println(maxDACvolt, 10);
-    elapsedtime = micros() - starttime;
-    SerialUSB.print(elapsedtime); SerialUSB.println(" micros taken");
-
-    SerialUSB.print("lockamp_debug: "); SerialUSB.print(lockamp_debug); SerialUSB.print(" averager_debug: "); SerialUSB.print(averager_debug); SerialUSB.print(" results_display: "); SerialUSB.println(results_display);
-    SerialUSB.print("averager_counter (ignore result below if this is <10,000): "); SerialUSB.println(averager_counter);
-    double averager_result = 2 * averager_sum / averager_size;
-    SerialUSB.print("averager_result: "); SerialUSB.println(averager_result, 10);
+    SerialUSB.print("lockamp_debug: "); SerialUSB.print(lockamp_debug); SerialUSB.print(" averager_debug: "); SerialUSB.println(averager_debug);
+    SerialUSB.print("averager_counter: "); SerialUSB.println(averager_counter);
     SerialUSB.print("averager (1st 100): "); printthisarray(100, averager);
+  }
+  if (inputstring_processed[0] == "help")
+  {
+    SerialUSB.println("Available commands: lockamp(repeat,frequency[frequency, frequency]) analogread analogwrite(0-4095) calibrate status debug(lockamp_debug, averager_debug)");
   }
   SerialUSB.print("auteur > ");
 }

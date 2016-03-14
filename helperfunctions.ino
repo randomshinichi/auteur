@@ -1,52 +1,51 @@
-void lockinamplifier(int rate, int repeat) {
+void lockinamplifier(int repeat, int rate) {
   zerothisarray(averager_size, averager);
   averager_counter = 0;
   averager_i = 0;
   averager_sum = 0;
-  int delaymicros = (1000000 / (rate * wave_samples))-39; // compensate for execution time of output_readin() algo
-  SerialUSB.print("delaymicros: ");  SerialUSB.println(delaymicros);
+    
+  int delaymicros = (1000000 / (rate * wave_samples)) - 8; // compensate for execution time of output_readin() algo
+  rangeADC = (maxADC - minADC) / 2; // calculates rangeADC again just in case you didn't run calibrate() before
   if (repeat > 0) {
     while (repeat > 0) {
-      starttime=micros();
       output_readin(delaymicros);
-      elapsedtime=micros()-starttime;
-      SerialUSB.print(elapsedtime);SerialUSB.println(" micros taken by output_readin");
       repeat--;
-      if (results_display) {
-        {
-          double result = averager_sum / averager_size;
-          SerialUSB.print("results: ");  //ensure you have >10000 samples in averager to make a meaningful reading
-          SerialUSB.println(averager_sum / averager_size, 10);
-          SerialUSB.print("ave_voltage: "); SerialUSB.println(sinescale2voltage(result), 10);
-        }
-      }
     }
   }
   else if (repeat == 0) {
     while (1) {
       output_readin(delaymicros);
-      if (results_display) {
-        {
-          double result = averager_sum / averager_size;
-          SerialUSB.print("results: ");  //ensure you have >10000 samples in averager to make a meaningful reading
-          SerialUSB.println(averager_sum / averager_size, 10);
-          SerialUSB.print("ave_voltage: "); SerialUSB.println(sinescale2voltage(result), 10);
-        }
-      }
     }
   }
   else
   {
-    output_readin(delaymicros);
+    SerialUSB.println("Did you just tell me to repeat the wavelength a negative amount of times?");
+  }
+  int scaledown = 2048 * rangeADC; // this number will normalize the huge numbers in the sum
+  sum_normthisarray(averager_size, averager, scaledown);
+  if (averager_debug) {
+    SerialUSB.print("scaledown: "); SerialUSB.println(scaledown);
+    SerialUSB.print("averager_sum: "); SerialUSB.println(averager_sum);
+  }
+  double averager_result = 2 * averager_sum / averager_size;
+  SerialUSB.print("averager_result: "); SerialUSB.print(averager_result, 10);
+  if (averager_counter >= averager_size)
+  {
+    SerialUSB.println(" OK");
+  }
+  else
+  {
+    SerialUSB.print(" INVALID: need "); SerialUSB.print(averager_size - averager_counter); SerialUSB.println(" more samples");
   }
 }
 void output_readin(int delaymicros) {
   for (int i = 0; i < wave_samples; ++i) {
     analogWrite(DAC1, scaledsine[i]);
-    //delayMicroseconds(delaymicros);
-    //delayMicroseconds itself takes about 2 micros, so when benchmarking output_readin, add 2micros to the result (37+2=39)
-    int input = analogRead(ADC0); //this will be between 0-4096, corresponding to 0 and 3.3V
-    double answer = int2sinescale(input, minADC, maxADC) * int2sinescale(scaledsine[i], 0, 4095);
+    delayMicroseconds(delaymicros);
+    //delayMicroseconds itself adds about 2 micros, so when benchmarking output_readin, add 2micros to the result (37+2=39)
+    // e.g. now output_readin() takes 8 micros. make lockinamplifier() compensate for 10
+    int input = analogRead(ADC0); //this will be between 0-4095, corresponding to 0 and 3.3V
+    int answer = (input - minADC - rangeADC) * (scaledsine[i] - 2047);
     add2averager(answer);
     if (lockamp_debug) {
       double output_voltage = int2voltage(scaledsine[i], minDACvolt, maxDACvolt);
@@ -56,40 +55,24 @@ void output_readin(int delaymicros) {
     }
   }
 }
-inline void add2averager(double Voutput) {
-  static double oldvalue = 0;
-  if (averager_debug) {
-    SerialUSB.print("averager_i: "); SerialUSB.println(averager_i);
-  }
+inline void add2averager(int answer) {
   if (averager_i == averager_size) {
     averager_i = 0;
   }
-  oldvalue = averager[averager_i];
-  averager[averager_i] = Voutput;
-  averager_sum = averager_sum - oldvalue;
-  averager_sum += Voutput;
+  averager[averager_i] = answer;
   averager_i++;
   averager_counter++;
 }
-double sinescale2voltage(double input) {
-  return (input * 1.65) + 1.65;
-}
 double int2voltage(int input, double vlow, double vhigh) { // voltage = int2voltage(800,0.55,2.75)
   double granularity = (vhigh - vlow) / 4096;
-  granularity = (granularity * input) + vlow;
-  return granularity;
-}
-inline double int2sinescale(int input, int minimum, int maximum) {
-  double sinescale;
-  int range = (maximum - minimum) / 2;
-  input = input - range - minimum;
-  sinescale = double(input) / double(range);
-  return sinescale;
+  double voltage = (granularity * input) + vlow;
+  return voltage;
 }
 void calibrate() {
   minADC = calibrate_helper(0);
   maxADC = calibrate_helper(4095);
-  SerialUSB.print("minADC: "); SerialUSB.print(minADC); SerialUSB.print(" maxADC: "); SerialUSB.println(maxADC);
+  rangeADC = (maxADC - minADC) / 2;
+  SerialUSB.print("minADC: "); SerialUSB.print(minADC); SerialUSB.print(" maxADC: "); SerialUSB.print(maxADC);  SerialUSB.print(" rangeADC: "); SerialUSB.println(rangeADC);
   minDACvolt = int2voltage(minADC, 0, 3.3);
   maxDACvolt = int2voltage(maxADC, 0, 3.3);
   SerialUSB.print("minDACvolt: "); SerialUSB.print(minDACvolt, 10); SerialUSB.print(" maxDACvolt: "); SerialUSB.println(maxDACvolt, 10);
@@ -106,17 +89,22 @@ int calibrate_helper(int x) {
   calib_accum = calib_accum / 40;
   return calib_accum;
 }
-void zerothisarray(int size, double thearray[]) {
+void zerothisarray(int size, int thearray[]) {
   for (int i = 0; i < size; i++) {
     thearray[i] = 0;
   }
 }
-void printthisarray(int size, double thearray[]) {
+void printthisarray(int size, int thearray[]) {
   for (int i = 0; i < size; i++) {
     SerialUSB.print(thearray[i], 5);
     SerialUSB.print(",");
   }
   SerialUSB.println("");
+}
+void sum_normthisarray(int size, int thearray[], int scale) { // usually takes 15,000 microsecs
+  for (int i = 0; i < size; i++) {
+    averager_sum += double(thearray[i]) / double(scale);
+  }
 }
 String* splitcmd(String command, char delimiter) {
   int endposition = -1;
